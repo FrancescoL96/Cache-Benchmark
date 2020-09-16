@@ -1,6 +1,3 @@
-/*
- * Apologies to whoever will have to read this code, I just discovered precompiler macros and I went crazy with it..
- */
 #include <chrono>
 #include <iostream>
 #include <random>
@@ -22,33 +19,39 @@ using namespace timer;
 #define TO_debug 16
 
 // Set ZEROCOPY to 1 to use Zero Copy Memory Mode, UNIFIED to 1 to use Unified Memory, COPY to 1 to use Copy
-#define ZEROCOPY 0
+#define ZEROCOPY 1
 #define UNIFIED 0
-#define COPY 1
+#define COPY 0
 
-// Set CPU to 1 to use the CPU concurrently
+// Set RESULTCHECK to 1 to verify the result with a single CPU thread
+#define RESULTCHECK 1
+
+// Set CPU to 1 to use the CPU concurrently, otherwise a slightly different version of the benchmark is used
 #define CPU 1
-// Set OPENMP to 1 to use more than 1 thread for the CPU
+// Set OPENMP to 1 to use more than 1 thread for the CPU (does nothing if CPU is set to 0)
 #define OPENMP 1
-#define TILE 1024
 
 unsigned int N = 2;
-const int POW = 12;			 // Maximum is 30, anything higher and the system will use swap, making the Cuda kernels crash
-const int RUNS = 50;
-const int SUMS = 8;
-const int BLOCK_SIZE_X = TILE;
+const int POW = 18;
+const int SUMS = 8; // As CPU and GPU work on either the left side or right side, this number indicates how many "side swaps" there will be
+const int RUNS = 5; // How many times the benchmark is run
+const int BLOCK_SIZE_X = 1024;
 const int BLOCK_SIZE_Y = 1;
 
 
 __global__
 void sum_gpu_left(int* matrix, const int N) {
+	// This kernel is exeuted for each position on the array "matrix" by a different thread
     int row = blockIdx.x * blockDim.x + threadIdx.x;
+	// Each GPU thread in the first half of the array
 	if (row < N/2) {
+		// if it's not an even position
 		if (row % 2 != 0) {
+			// repeats twice
 			for (int l = 0; l < 2; l++) {
+				// a sum on using data from every other odd position
 			    for (int i = 1; i < N/2; i+=2) {
-				//printf("left: %d\n", i+N/2);
-					atomicAdd(&matrix[row], matrix[i+N/2]);
+					matrix[row] += matrix[i + N/2];
 				}	
 			}
 		}
@@ -63,8 +66,7 @@ void sum_gpu_right(int* matrix, const int N) {
 		if (row % 2 == 0) {
 			for (int l = 0; l < 2; l++) {
 				for (int i = N/2; i < N; i+=2) {
-					//printf("right: %d\n", i-N/2);
-					atomicAdd(&matrix[row], matrix[i-N/2]);
+					matrix[row] += matrix[i - N/2];
 				}
 			}
 		}
@@ -158,8 +160,7 @@ int main() {
     int * h_matrix = new int[N];
  
     std::vector<float> results; 	// Stores computation times for CPU+GPU
-    std::vector<float> cpu_results; // Stores CPU (only) computation times
-    std::vector<float> gpu_results; // Stores GPU (only) computation times
+    std::vector<float> cpu_results; // Stores CPU (only) computation times   
 
     // -------------------------------------------------------------------------
     #if ZEROCOPY
@@ -242,11 +243,13 @@ int main() {
 
         // -------------------------------------------------------------------------
         // CPU ONLY EXECUTION
-        std::cout << "Starting computation (1T - NO GPU)..." << std::endl;
+        #if RESULTCHECK
+        std::cout << "Starting computation for result check (1T - NO GPU)..." << std::endl;
         sum_cpu_only(h_matrix);
+        #endif
         // -------------------------------------------------------------------------
         // DEVICE EXECUTION
-        std::cout << "Starting computation (GPU+CPU)..." << std::endl;
+        std::cout << "Starting computation (CPU+GPU)..." << std::endl;
 		TM.start();
 		
 	    #if CPU
@@ -270,11 +273,9 @@ int main() {
 				#endif
 				for (int j = N/2; j < N; j++) {
 					if (j % 2 == 0) {
-						//__sync_fetch_and_add(&d_matrix[j], 1);
 						for (int r = 0; r < 1000; r++) {
 							d_matrix[j] = sqrt(d_matrix[j]*(d_matrix[j] / 2.3));
 						}
-						//printf("cpu right: %d\n", j);
 					}
 				}
 		        TM_host.stop();
@@ -296,11 +297,9 @@ int main() {
 				#endif
 				for (int j = 0; j < N/2; j++) {
 					if (j % 2 != 0) {
-						//__sync_fetch_and_add(&d_matrix[j], 1);
 						for (int r = 0; r < 1000; r++) {
 							d_matrix[j] = sqrt(d_matrix[j]*(d_matrix[j] / 2.3));
 						}
-						//printf("cpu left: %d\n", j);
 					}
 				}
 				TM_host.stop();
@@ -366,6 +365,7 @@ int main() {
 
         // -------------------------------------------------------------------------
         // RESULT CHECK
+        #if RESULTCHECK
         for (int i = 0; i < N; i++) {
             if (h_matrix[i] != d_matrix[i]) {
                 std::cerr << ">< wrong result at: "
@@ -396,6 +396,7 @@ int main() {
             }
         }
         std::cout << "<> Correct\n\n";
+        #endif
 
         // -------------------------------------------------------------------------
         // DEVICE MEMORY DEALLOCATION

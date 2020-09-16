@@ -31,8 +31,10 @@ using namespace timer;
 // Set OPENMP to 1 to use more than 1 thread for the CPU (does nothing if CPU is set to 0)
 #define OPENMP 1
 
+// N is later overwritten as N = N^POW, making N the size of the input array
 unsigned int N = 2;
 const int POW = 18;
+
 const int SUMS = 8; // As CPU and GPU work on either the left side or right side, this number indicates how many "side swaps" there will be
 const int RUNS = 5; // How many times the benchmark is run
 const int BLOCK_SIZE_X = 1024;

@@ -17,9 +17,9 @@
 using namespace timer;
 
 // Set PRINT to 1 for debug output
-#define PRINT 1
+#define PRINT 0
 #define FROM_debug 0
-#define TO_debug 8
+#define TO_debug 16
 
 // Set ZEROCOPY to 1 to use Zero Copy Memory Mode, UNIFIED to 1 to use Unified Memory, COPY to 1 to use Copy
 #define ZEROCOPY 0
@@ -50,8 +50,6 @@ void sum_gpu_left(float* matrix, const int N) {
 		if (row % 2 != 0) {
 		    for (int i = 1; i < N/2; i+=2) {
     			for (int l = 0; l < 2; l++) {
-					//printf("left: %d\n", i+N/2);
-					//atomicAdd(&matrix[row], matrix[i+N/2]);
 					matrix[row] += sqrt(float(matrix[i + N/2]));
 				}	
 			}
@@ -67,13 +65,7 @@ void sum_gpu_right(float* matrix, const int N) {
 		if (row % 2 == 0) {
 			for (int i = N/2; i < N; i+=2) {
 				for (int l = 0; l < 2; l++) {
-					//printf("right: %d\n", i-N/2);
-					//atomicAdd(&matrix[row], matrix[i-N/2]);
 					matrix[row] += sqrt(float(matrix[i - N/2]));
-					float f = sqrt((matrix[i - N/2]));
-					if (row == 4)  {
-						printf("old_value: %f - sum: %f \n", matrix[i-N/2], 	f);
-					}
 				}
 			}
 		}

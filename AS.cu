@@ -1,3 +1,6 @@
+/*
+ * Apologies to whoever will have to read this code, I just discovered precompiler macros and I went crazy with it..
+ */
 #include <chrono>
 #include <iostream>
 #include <random>
@@ -14,46 +17,42 @@
 using namespace timer;
 
 // Set PRINT to 1 for debug output
-#define PRINT 0
+#define PRINT 1
 #define FROM_debug 0
-#define TO_debug 16
+#define TO_debug 8
 
 // Set ZEROCOPY to 1 to use Zero Copy Memory Mode, UNIFIED to 1 to use Unified Memory, COPY to 1 to use Copy
-#define ZEROCOPY 1
+#define ZEROCOPY 0
 #define UNIFIED 0
-#define COPY 0
+#define COPY 1
 
 // Set RESULTCHECK to 1 to verify the result with a single CPU thread
 #define RESULTCHECK 1
 
-// Set CPU to 1 to use the CPU concurrently, otherwise a slightly different version of the benchmark is used
+// Set CPU to 1 to use the CPU concurrently
 #define CPU 1
-// Set OPENMP to 1 to use more than 1 thread for the CPU (does nothing if CPU is set to 0)
+// Set OPENMP to 1 to use more than 1 thread for the CPU
 #define OPENMP 1
+#define TILE 1024
 
-// N is later overwritten as N = N^POW, making N the size of the input array
 unsigned int N = 2;
-const int POW = 18;
-
-const int SUMS = 8; // As CPU and GPU work on either the left side or right side, this number indicates how many "side swaps" there will be
-const int RUNS = 5; // How many times the benchmark is run
-const int BLOCK_SIZE_X = 1024;
+const int POW = 3;			 // Maximum is 30, anything higher and the system will use swap, making the Cuda kernels crash
+const int RUNS = 1;
+const int SUMS = 2;
+const int BLOCK_SIZE_X = TILE;
 const int BLOCK_SIZE_Y = 1;
 
 
 __global__
-void sum_gpu_left(int* matrix, const int N) {
-	// This kernel is exeuted for each position on the array "matrix" by a different thread
+void sum_gpu_left(float* matrix, const int N) {
     int row = blockIdx.x * blockDim.x + threadIdx.x;
-	// Each GPU thread in the first half of the array
 	if (row < N/2) {
-		// if it's not an even position
 		if (row % 2 != 0) {
-			// repeats twice
-			for (int l = 0; l < 2; l++) {
-				// a sum on using data from every other odd position
-			    for (int i = 1; i < N/2; i+=2) {
-					matrix[row] += matrix[i + N/2];
+		    for (int i = 1; i < N/2; i+=2) {
+    			for (int l = 0; l < 2; l++) {
+					//printf("left: %d\n", i+N/2);
+					//atomicAdd(&matrix[row], matrix[i+N/2]);
+					matrix[row] += sqrt(float(matrix[i + N/2]));
 				}	
 			}
 		}
@@ -62,28 +61,34 @@ void sum_gpu_left(int* matrix, const int N) {
 
 
 __global__
-void sum_gpu_right(int* matrix, const int N) {
+void sum_gpu_right(float* matrix, const int N) {
     int row = blockIdx.x * blockDim.x + threadIdx.x;
 	if (row >= N/2 && row < N) {
 		if (row % 2 == 0) {
-			for (int l = 0; l < 2; l++) {
-				for (int i = N/2; i < N; i+=2) {
-					matrix[row] += matrix[i - N/2];
+			for (int i = N/2; i < N; i+=2) {
+				for (int l = 0; l < 2; l++) {
+					//printf("right: %d\n", i-N/2);
+					//atomicAdd(&matrix[row], matrix[i-N/2]);
+					matrix[row] += sqrt(float(matrix[i - N/2]));
+					float f = sqrt((matrix[i - N/2]));
+					if (row == 4)  {
+						printf("old_value: %f - sum: %f \n", matrix[i-N/2], 	f);
+					}
 				}
 			}
 		}
 	}
 }
 
-void sum_cpu_only(int * matrix){
+void sum_cpu_only(float * matrix){
 	#if CPU
 	for (int i = 0; i < SUMS; i++) {
 		if (i % 2 != 0) {
 	        for (int j = 0; j < N/2; j++) {
-	        	for (int f = 1; f < N/2; f+=2) {
-				    if (j % 2 != 0) {
+			    if (j % 2 != 0) {
+		        	for (int f = 1; f < N/2; f+=2) {
 				    	for (int l = 0; l < 2; l++) {
-							matrix[j] += matrix[f+N/2];
+							matrix[j] += sqrt(float(matrix[f+N/2]));
 						}
 					}
 				}
@@ -91,16 +96,16 @@ void sum_cpu_only(int * matrix){
 			for (int j = N/2; j < N; j++) {
 				if (j % 2 == 0) {
 					for (int r = 0; r < 1000; r++) {
-						matrix[j] = sqrt(matrix[j]*(matrix[j] / 2.3));
+						matrix[j] = sqrt((j+matrix[j])*(matrix[j] / 2.3));
 					}
 				}
 			}
 		} else {
    	        for (int j = N/2; j < N; j++) {
-	        	for (int f = N/2; f < N; f+=2) {
-	   	        	if (j % 2 == 0) {
+   	        	if (j % 2 == 0) {
+		        	for (int f = N/2; f < N; f+=2) {
 				    	for (int l = 0; l < 2; l++) {
-							matrix[j] += matrix[f-N/2];
+							matrix[j] += sqrt(float(matrix[f-N/2]));
 						}
 					}
 				}
@@ -108,7 +113,7 @@ void sum_cpu_only(int * matrix){
 			for (int j = 0; j < N/2; j++) {
 				if (j % 2 != 0) {
 					for (int r = 0; r < 1000; r++) {
-						matrix[j] = sqrt(matrix[j]*(matrix[j] / 2.3));
+						matrix[j] = sqrt((j+matrix[j])*(matrix[j] / 2.3));
 					}
 				}
 			}
@@ -119,7 +124,7 @@ void sum_cpu_only(int * matrix){
 		printf("H: ");
 		for (int i = FROM_debug; i < TO_debug; i++) {
 			if (i % (N/2) == 0) printf("| ");
-			printf("%d ", matrix[i]);
+			printf("%.2f ", matrix[i]);
 		}
  		printf("\n");
  		#endif
@@ -130,7 +135,7 @@ void sum_cpu_only(int * matrix){
         	for (int f = 1; f < N/2; f+=2) {
 		        if (j % 2 != 0) {
 			    	for (int l = 0; l < 2; l++) {
-						matrix[j] += matrix[f+N/2];
+						matrix[j] += sqrt(float(matrix[f+N/2]));
 					}
 				}
 			}
@@ -139,7 +144,7 @@ void sum_cpu_only(int * matrix){
         	for (int f = N/2; f < N; f+=2) {
 	        	if (j % 2 == 0) {
 			    	for (int l = 0; l < 2; l++) {
-						matrix[j] += matrix[f-N/2];
+						matrix[j] += sqrt(float(matrix[f-N/2]));
 					}
 				}
 			}
@@ -159,10 +164,11 @@ int main() {
 
     // -------------------------------------------------------------------------
     // HOST MEMORY ALLOCATION
-    int * h_matrix = new int[N];
+    float * h_matrix = new float[N];
  
     std::vector<float> results; 	// Stores computation times for CPU+GPU
-    std::vector<float> cpu_results; // Stores CPU (only) computation times   
+    std::vector<float> cpu_results; // Stores CPU (only) computation times
+    std::vector<float> gpu_results; // Stores GPU (only) computation times
 
     // -------------------------------------------------------------------------
     #if ZEROCOPY
@@ -176,23 +182,24 @@ int main() {
 		
         Timer<HOST> TM;
         Timer<HOST> TM_host;
+        Timer<DEVICE> TM_device;
 
         // -------------------------------------------------------------------------
         // DEVICE MEMORY ALLOCATION
-        int * d_matrix_host;
-        int * d_matrix;
+        float * d_matrix_host;
+        float * d_matrix;
         #if ZEROCOPY
         // Zero Copy Allocation
-		SAFE_CALL(cudaHostAlloc((void **)&d_matrix_host, N * sizeof(int), cudaHostAllocMapped));
+		SAFE_CALL(cudaHostAlloc((void **)&d_matrix_host, N * sizeof(float), cudaHostAllocMapped));
         SAFE_CALL(cudaHostGetDevicePointer((void **)&d_matrix, (void *) d_matrix_host , 0));
         #elif UNIFIED
         // Unified Memory Allocation
-        SAFE_CALL(cudaMallocManaged(&d_matrix, N * sizeof(int)));
+        SAFE_CALL(cudaMallocManaged(&d_matrix, N * sizeof(float)));
         #elif COPY
         // Standard Copy
-        int * d_matrix_device;
-        SAFE_CALL(cudaMalloc(&d_matrix_device, N * sizeof(int)));
-        d_matrix = new int[N];
+        float * d_matrix_device;
+        SAFE_CALL(cudaMalloc(&d_matrix_device, N * sizeof(float)));
+        d_matrix = new float[N];
 		#endif
         // -------------------------------------------------------------------------
         // MATRIX INITILIZATION
@@ -206,6 +213,7 @@ int main() {
 		int count = 1;
 		printf("Progress: 0 \%\t");
   		fflush(stdout);
+  		float arr[8] = {86.0, 47.0, 55.0, 72.0, 53.0, 38.0, 97.0, 93.0};
 		#endif
         for (int i = 0; i < N; i++) {
 			#if PRINT
@@ -216,7 +224,8 @@ int main() {
 				count++;
 			}
 			#endif
-			int temp = distribution(generator);
+			//int temp = distribution(generator);
+			int temp = arr[i];
 			h_matrix[i] = temp;
 			d_matrix[i] = temp;
         }
@@ -231,13 +240,13 @@ int main() {
 		printf("H: ");
 	    for (int i = FROM_debug; i < TO_debug; i++) {
 	    	if (i % (N/2) == 0) printf("| ");
-	    	printf("%d ", h_matrix[i]);
+	    	printf("%.2f ", h_matrix[i]);
 	    }
 		printf("\n");
 		printf("D: ");
 	    for (int i = FROM_debug; i < TO_debug; i++) {
 	    	if (i % (N/2) == 0) printf("| ");
-			printf("%d ", d_matrix[i]);
+			printf("%.2f ", d_matrix[i]);
 	    }
    		printf("\n");
 		#endif
@@ -246,12 +255,12 @@ int main() {
         // -------------------------------------------------------------------------
         // CPU ONLY EXECUTION
         #if RESULTCHECK
-        std::cout << "Starting computation for result check (1T - NO GPU)..." << std::endl;
+        std::cout << "Starting computation (1T - NO GPU)..." << std::endl;
         sum_cpu_only(h_matrix);
         #endif
         // -------------------------------------------------------------------------
         // DEVICE EXECUTION
-        std::cout << "Starting computation (CPU+GPU)..." << std::endl;
+        std::cout << "Starting computation (GPU+CPU)..." << std::endl;
 		TM.start();
 		
 	    #if CPU
@@ -259,11 +268,15 @@ int main() {
 			if (i % 2 != 0) {
 				#if COPY
 				SAFE_CALL(cudaMemcpy(d_matrix_device, d_matrix, N * sizeof(int), cudaMemcpyHostToDevice));
+				TM_device.start();					
 		        sum_gpu_left << < DimGrid, DimBlock >> > (d_matrix_device, N);
+				TM_device.stop();
 		        CHECK_CUDA_ERROR
    		        SAFE_CALL(cudaMemcpy(d_matrix, d_matrix_device, N * sizeof(int), cudaMemcpyDeviceToHost));
 				#else
+				TM_device.start();
 		        sum_gpu_left << < DimGrid, DimBlock >> > (d_matrix, N);
+		        TM_device.stop();
 		        #endif
 		        #if UNIFIED
 		        // This macro includes cudaDeviceSynchronize(), which makes the program work on the data in lockstep
@@ -275,20 +288,26 @@ int main() {
 				#endif
 				for (int j = N/2; j < N; j++) {
 					if (j % 2 == 0) {
+						//__sync_fetch_and_add(&d_matrix[j], 1);
 						for (int r = 0; r < 1000; r++) {
-							d_matrix[j] = sqrt(d_matrix[j]*(d_matrix[j] / 2.3));
+							d_matrix[j] = sqrt((j+d_matrix[j])*(d_matrix[j] / 2.3));
 						}
+						//printf("cpu right: %d\n", j);
 					}
 				}
 		        TM_host.stop();
 			} else {				
 				#if COPY
 				SAFE_CALL(cudaMemcpy(d_matrix_device, d_matrix, N * sizeof(int), cudaMemcpyHostToDevice));
+				TM_device.start();
 	   	        sum_gpu_right << < DimGrid, DimBlock >> > (d_matrix_device, N);
+				TM_device.stop();	
    		        CHECK_CUDA_ERROR
 		        SAFE_CALL(cudaMemcpy(d_matrix, d_matrix_device, N * sizeof(int), cudaMemcpyDeviceToHost));
 				#else
+				TM_device.start();	
 	   	        sum_gpu_right << < DimGrid, DimBlock >> > (d_matrix, N);
+				TM_device.stop();
 	   	        #endif
    		        #if UNIFIED
    		        CHECK_CUDA_ERROR
@@ -299,9 +318,11 @@ int main() {
 				#endif
 				for (int j = 0; j < N/2; j++) {
 					if (j % 2 != 0) {
+						//__sync_fetch_and_add(&d_matrix[j], 1);
 						for (int r = 0; r < 1000; r++) {
-							d_matrix[j] = sqrt(d_matrix[j]*(d_matrix[j] / 2.3));
+							d_matrix[j] = sqrt((j+d_matrix[j])*(d_matrix[j] / 2.3));
 						}
+						//printf("cpu left: %d\n", j);
 					}
 				}
 				TM_host.stop();
@@ -318,7 +339,7 @@ int main() {
 			printf("D: ");
 			for (int i = FROM_debug; i < TO_debug; i++) {
 				if (i % (N/2) == 0) printf("| ");
-				printf("%d ", d_matrix[i]);
+				printf("%.2f ", d_matrix[i]);
 			}
 	 		printf("\n");
 	 		#endif
@@ -351,18 +372,19 @@ int main() {
 		printf("H: ");
 	    for (int i = FROM_debug; i < TO_debug; i++) {
 	    	if (i % (N/2) == 0) printf("| ");
-	    	printf("%d ", h_matrix[i]);
+	    	printf("%.2f ", h_matrix[i]);
 	    }
 		printf("\n");
 		printf("D: ");
 	    for (int i = FROM_debug; i < TO_debug; i++) {
 	    	if (i % (N/2) == 0) printf("| ");
-			printf("%d ", d_matrix[i]);
+			printf("%.2f ", d_matrix[i]);
 	    }
  		printf("\n");
  		#endif
  		
         cpu_results.push_back(TM_host.total_duration());
+        gpu_results.push_back(TM_device.total_duration());
         results.push_back(TM.total_duration());
 
         // -------------------------------------------------------------------------
@@ -383,12 +405,12 @@ int main() {
 				printf("Values from index %d to %d\n", err_min, err_max);
 				printf("\tH: ");
 				for (int j = err_min; j < err_max; j++) {
-					printf("%d ", h_matrix[j]);
+					printf("%.2f ", h_matrix[j]);
 				}
 				printf("\n");
 				printf("\tD: ");
 				for (int j = err_min; j < err_max; j++) {
-					printf("%d ", d_matrix[j]);
+					printf("%.2f ", d_matrix[j]);
 				}
 		 		printf("\n\n");
 		 		#endif
@@ -420,7 +442,8 @@ int main() {
 	else if(UNIFIED) std::cout << "UM";
 	else if(COPY) std::cout << "CP";
 	std::cout << " Run time: " << std::accumulate(results.begin(), results.end(), 0) / float(RUNS) << " ms - ";
-    std::cout << "CPU time only " << std::accumulate(cpu_results.begin(), cpu_results.end(), 0) / float(RUNS) << " ms" << std::endl;
+    std::cout << "CPU time only " << std::accumulate(cpu_results.begin(), cpu_results.end(), 0) / float(RUNS) << " ms - ";
+    std::cout << "GPU kernel time " << std::accumulate(gpu_results.begin(), gpu_results.end(), 0) / float(RUNS*SUMS) << " ms" << std::endl;
 
 }
 

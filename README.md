@@ -43,3 +43,7 @@ const int BLOCK_SIZE_Y = 1;
 ```
 # Result
 The CPU, when using Unified Memory, Copy or Zero Copy, takes similar amounts of time, meanwhile the GPU is always significantly slower on Zero Copy, even if the average GPU kernel time is about 5x slower compared to the 80x slower when run on a TX2. While it is still a lot faster compared to a TX2, it is still much slower when compared to Unified Memory/Copy: the benefit of concurrent access and removing the copy times are heavily outweighed by the slower GPU computation times.
+
+For the concurrent benchmark, see: https://github.com/FrancescoL96/Concurrent-Cache-Benchmark-Cuda
+
+For the incremental benchmark, see: https://github.com/FrancescoL96/Incremental-Cache-Benchmark-Cuda
